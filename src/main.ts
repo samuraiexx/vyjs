@@ -1,341 +1,269 @@
-import * as Y from 'yjs';
+import { Map as YMap, Text as YText, Array as YArray, YEvent, AbstractType as YAbstractType } from 'yjs';
+import { JSONValue, JSONObject, JSONArray, JsonToYType, JSONPrimitive } from './types';
 
-import { Map as YMap, Text as YText, Array as YArray, AbstractType, YEvent } from 'yjs';
-import { Delta, ObjectDelta, ArrayDelta, TextDiffDelta } from 'jsondiffpatch';
-import { Path, JSONValue, JSONObject } from './types';
+// Get Yjs events handler that can be passed to Yjs.observeDeep
+export function getYjsEventsHandler(currentValue: JSONValue, callback: (updatedValue: JSONValue) => void) {
+  return (events: YEvent<YAbstractType<unknown>>[]) => {
+    const builder = (obj: JSONValue, path: (string | number)[], value: JSONValue): JSONValue => {
+      if (path.length === 0 ||
+        obj === undefined ||
+        typeof path[0] === 'number' && !(obj instanceof Array) ||
+        typeof path[0] === 'string' && !(obj instanceof Object)
+      ) {
+        return value;
+      }
 
-export function getYjsEventsHandler(plainObject: JSONObject) {
-  return (events: YEvent<Y.AbstractType<unknown>>[]) => {
+      const key = path[0];
+      if (typeof key === 'number') {
+        const newArray = [...(obj as JSONArray)];
+        newArray[key] = builder((obj as JSONArray)[key], path.slice(1), value);
+        return newArray;
+      }
+
+      if (typeof key === 'string') {
+        return { ...(obj as JSONObject), [key]: builder((obj as JSONObject)[key], path.slice(1), value) };
+      }
+    };
+
     events.forEach(event => {
-      const path = event.path;
       const value = serializeYType(event.target);
-
-      // Build the path in the plain object
-      let current = plainObject;
-      for (let i = 0; i < path.length - 1; i++) {
-        const key = path[i];
-        if (current[key] === undefined) {
-          current[key] = {};
-        }
-        current = current[key] as JSONObject;
-      }
-
-      const key = path[path.length - 1];
-      if (key !== undefined) {
-        current[key] = value;
-      } else {
-        Object.assign(plainObject, value);
-      }
+      currentValue = builder(currentValue, event.path, value);
     });
+
+    callback(currentValue);
   };
 }
 
-export function applyJsonDiffPatchDelta(
-  yType: YMap<unknown> | YArray<unknown> | YText,
-  delta: Delta
+// Apply the difference between two JSON objects to a Yjs type
+export function applyJsonDiffToYjs(
+  oldValue: JSONValue,
+  newValue: JSONValue,
+  yValue: YMap<unknown> | YArray<unknown> | YText | JSONPrimitive,
+  yValueParent: YMap<unknown> | YArray<unknown> | undefined = undefined,
+  yValueKey: number | string | undefined = undefined
 ): void {
-  if (yType instanceof YMap) {
-    applyMapDelta(yType, delta as ObjectDelta);
-  } else if (yType instanceof YArray) {
-    applyArrayDelta(yType, delta as ArrayDelta);
-  } else if (yType instanceof YText) {
-    applyTextDelta(yType, delta as TextDiffDelta);
-  } else {
-    throw new Error('Unsupported Yjs type');
-  }
-}
-
-function serializeYType(yType: Y.AbstractType<unknown>): JSONValue {
-  if (yType instanceof Y.Map) {
-    const obj: JSONValue = {};
-    yType.forEach((value: Y.AbstractType<unknown>, key: string) => {
-      obj[key] = serializeYType(value);
-    });
-    return obj;
-  } else if (yType instanceof Y.Array) {
-    return yType.toArray().map((item: Y.AbstractType<unknown>) => serializeYType(item));
-  } else if (yType instanceof Y.Text) {
-    return yType.toString();
-  } else {
-    return yType as unknown as JSONValue;
-  }
-}
-
-function applyMapDelta(yMap: YMap<unknown>, delta: ObjectDelta): void {
-  for (const key in delta) {
-    const change = delta[key];
-
-    if (Array.isArray(change)) {
-      if (change.length === 1) {
-        // Addition
-        const newValue = change[0];
-        if (typeof newValue === 'string') {
-          const yText = new YText();
-          yText.insert(0, newValue);
-          yMap.set(key, yText);
-        } else {
-          yMap.set(key, newValue);
-        }
-      } else if (change.length === 2) {
-        // Modification
-        const newValue = change[1];
-        const oldValue = yMap.get(key);
-
-        if (oldValue instanceof YText && typeof newValue === 'string') {
-          // Update Y.Text content
-          updateYText(oldValue, newValue);
-        } else {
-          yMap.set(key, newValue);
-        }
-      } else if (change.length === 3 && change[2] === 0) {
-        // Deletion
-        yMap.delete(key);
-      }
-    } else if (typeof change === 'object' && change !== null) {
-      // Nested object
-      let childYType = yMap.get(key) as YMap<unknown> | YArray<unknown> | YText | undefined;
-
-      if (childYType == null) {
-        // Determine the Yjs type based on the delta
-        if (isArrayDelta(change)) {
-          childYType = new YArray();
-        } else if (isTextDelta(change)) {
-          childYType = new YText();
-        } else {
-          childYType = new YMap();
-        }
-        yMap.set(key, childYType);
-      }
-
-      applyJsonDiffPatchDelta(childYType, change);
-    } else {
-      console.warn(`Unknown change type at key: ${key}`, change);
-    }
-  }
-}
-
-function applyArrayDelta(yArray: YArray<unknown>, delta: ArrayDelta): void {
-  if (delta['_t'] !== 'a') {
-    throw new Error('Invalid array delta');
+  if (oldValue === newValue) {
+    return;
   }
 
-  const indexChanges = Object.keys(delta).filter(key => key !== '_t');
+  const oldValueType = getJsonType(oldValue);
+  const newValueType = getJsonType(newValue);
 
-  indexChanges.forEach(indexKey => {
-    const change = delta[indexKey as unknown as number];
-    const index = parseInt(indexKey.replace('_', ''), 10);
-
-    if (Array.isArray(change)) {
-      if (change[2] === 0) {
-        // Deletion
-        yArray.delete(index, 1);
-      } else if (change.length === 1) {
-        // Addition
-        yArray.insert(index, [change[0]]);
-      } else if (change.length === 2) {
-        // Modification
-        yArray.delete(index, 1);
-        yArray.insert(index, [change[1]]);
-      }
-    } else if (typeof change === 'object' && change !== null) {
-      // Nested changes within an array element
-      const element = yArray.get(index) as AbstractType<unknown>;
-      if (element instanceof YMap || element instanceof YArray || element instanceof YText) {
-        applyJsonDiffPatchDelta(element, change);
-      } else {
-        console.warn(`Unsupported Yjs type in array at index: ${index}`);
-      }
-    } else {
-      console.warn(`Unknown change type at array index: ${index}`, change);
-    }
-  });
-}
-
-function applyTextDelta(yText: YText, delta: TextDiffDelta): void {
-  if (Array.isArray(delta)) {
-    if (delta.keys.length === 1) {
-      // Addition or replacement
-      yText.delete(0, yText.length);
-      yText.insert(0, delta[0] as string);
-    } else if (delta.keys.length === 2) {
-      // Modification
-      const newValue = delta[1] as unknown as string;
-      updateYText(yText, newValue);
-    } else {
-      console.warn('Unsupported text delta format', delta);
-    }
-  } else {
-    console.warn('Invalid delta format for Y.Text', delta);
-  }
-}
-
-function updateYText(yText: YText, newValue: string): void {
-  // Simple implementation: replace entire content
-  yText.delete(0, yText.length);
-  yText.insert(0, newValue);
-}
-
-function isArrayDelta(delta: Delta): delta is Delta {
-  return (
-    typeof delta === 'object' &&
-    delta !== null &&
-    '_t' in delta &&
-    (delta as ArrayDelta)['_t'] === 'a'
+  assert(
+    yValue instanceof YMap && oldValueType === JsonType.Object ||
+    yValue instanceof YArray && oldValueType === JsonType.Array ||
+    yValue instanceof YText && oldValueType === JsonType.Text ||
+    oldValueType === JsonType.primitive,
+    'Old value type does not match Yjs type'
   );
-}
 
-function isTextDelta(delta: Delta): boolean {
-  // A heuristic to determine if the delta is for Y.Text
-  return Array.isArray(delta) && delta.every(item => typeof item === 'string');
-}
+  assert(
+    yValueParent instanceof YMap || yValueParent instanceof YArray || yValueParent === undefined,
+    "Invalid parent type"
+  );
 
-function processYjsEvent(
-  event: Y.YEvent<Y.AbstractType<unknown>>,
-  delta: Delta,
-  path: Path
-): void {
-  if (event instanceof Y.YMapEvent) {
-    handleMapEvent(event, delta, path);
-  } else if (event instanceof Y.YArrayEvent) {
-    handleArrayEvent(event, delta, path);
-  } else if (event instanceof Y.YTextEvent) {
-    handleTextEvent(event, delta, path);
+  if (oldValueType !== newValueType || newValueType === JsonType.primitive) {
+    if (yValueParent instanceof YMap) {
+      yValueParent.delete(yValueKey as string);
+      yValueParent.set(yValueKey as string, jsonToYType(newValue));
+    }
+
+    if (yValueParent instanceof YArray) {
+      yValueParent.delete(yValueKey as number, 1);
+      yValueParent.insert(yValueKey as number, [jsonToYType(newValue)]);
+    }
+
+    return;
+  }
+
+  switch (newValueType) {
+    case JsonType.Object:
+      applyMapDelta(oldValue as JSONObject, newValue as JSONObject, yValue as YMap<unknown>);
+      break;
+    case JsonType.Array:
+      applyArrayDelta(oldValue as JSONArray, newValue as JSONArray, yValue as YArray<unknown>);
+      break;
+    case JsonType.Text:
+      applyTextDelta(oldValue as string, newValue as string, yValue as YText);
+      break;
+    default:
+      throw new Error('Invalid JSON type');
   }
 }
 
-function handleMapEvent(
-  event: Y.YMapEvent<unknown>,
-  delta: Delta,
-  path: Path
-): void {
-  const { keysChanged, target } = event;
 
-  keysChanged.forEach(key => {
-    const keyChange = event.changes.keys.get(key);
-    const currentPath = [...path, key];
-
-    if (keyChange) {
-      if (keyChange.action === 'add') {
-        const newValue = target.get(key);
-        const jsonValue = yjsValueToJSON(newValue);
-        setDeltaValue(delta, currentPath, [jsonValue]);
-      } else if (keyChange.action === 'update') {
-        const oldValue = keyChange.oldValue;
-        const newValue = target.get(key);
-
-        // Check if the newValue is a Yjs type
-        if (newValue instanceof Y.AbstractType) {
-          // Process nested events recursively
-          const nestedEvent = new Y.YEvent(newValue, event.transaction);
-          processYjsEvent(nestedEvent, delta, currentPath);
-        } else {
-          const oldJsonValue = yjsValueToJSON(oldValue);
-          const newJsonValue = yjsValueToJSON(newValue);
-          setDeltaValue(delta, currentPath, [oldJsonValue, newJsonValue]);
-        }
-      } else if (keyChange.action === 'delete') {
-        const oldValue = keyChange.oldValue;
-        const oldJsonValue = yjsValueToJSON(oldValue);
-        setDeltaValue(delta, currentPath, [oldJsonValue, 0, 0]);
-      }
+// Convert JSON object to Yjs type
+export function jsonToYType<T>(object: T): JsonToYType<T> {
+  if (Array.isArray(object)) {
+    const yArray = new YArray();
+    object.forEach((value) => yArray.push([jsonToYType(value)]));
+    return yArray as JsonToYType<T>;
+  } else if (typeof object === "object") {
+    const map = new YMap();
+    for (const key in object) {
+      map.set(key, jsonToYType(object[key]));
     }
+    return map as JsonToYType<T>;
+  } else if (typeof object === "string") {
+    return new YText(object) as JsonToYType<T>;
+  } else {
+    return object as unknown as JsonToYType<T>;
+  }
+}
+
+enum JsonType {
+  Object = 'object',
+  Array = 'array',
+  Text = 'text',
+  primitive = 'primitive',
+}
+
+function getJsonType(value: JSONValue): JsonType {
+  if (value instanceof Array) {
+    return JsonType.Array;
+  } else if (value instanceof Object) {
+    return JsonType.Object;
+  } else if (typeof value === 'string') {
+    return JsonType.Text;
+  } else {
+    return JsonType.primitive;
+  }
+}
+
+function assert(condition: boolean, message: string): void {
+  if (!condition) {
+    throw new Error(message);
+  }
+}
+
+export function lcs<T extends string | unknown[]>(left: T, right: T): { leftIndexes: number[]; rightIndexes: number[] } {
+  const dp = Array.from({ length: left.length + 1 }, () => Array(right.length + 1).fill(0));
+
+  for (let i = 1; i <= left.length; i++) {
+    for (let j = 1; j <= right.length; j++) {
+      dp[i][j] = left[i - 1] === right[j - 1] ? dp[i - 1][j - 1] + 1 : Math.max(dp[i - 1][j], dp[i][j - 1]);
+    }
+  }
+
+  const leftIndexes: number[] = [];
+  const rightIndexes: number[] = [];
+
+  let i = left.length;
+  let j = right.length;
+
+  while (i > 0 && j > 0) {
+    if (left[i - 1] === right[j - 1]) {
+      leftIndexes.push(i - 1);
+      rightIndexes.push(j - 1);
+      i--;
+      j--;
+    } else if (dp[i - 1][j] > dp[i][j - 1]) {
+      i--;
+    } else {
+      j--;
+    }
+  }
+
+  return { leftIndexes: leftIndexes.reverse(), rightIndexes: rightIndexes.reverse() };
+}
+
+function serializeYType(yType: YAbstractType<unknown>): JSONValue {
+  if (yType instanceof YMap || yType instanceof YArray || yType instanceof YText) {
+    return yType.toJSON();
+  } else {
+    return yType as unknown as JSONPrimitive;
+  }
+}
+
+function applyMapDelta(oldValue: JSONObject, newValue: JSONObject, yMap: YMap<unknown>): void {
+  const oldValueKeys = new Set(oldValue ? Object.keys(oldValue) : []);
+  const newValueKeys = new Set(newValue ? Object.keys(newValue) : []);
+
+  const deletedKeys = [...oldValueKeys].filter(key => !newValueKeys.has(key));
+  const addedKeys = [...newValueKeys].filter(key => !oldValueKeys.has(key));
+  const commonKeys = [...oldValueKeys].filter(key => newValueKeys.has(key));
+
+  // Handle deletions
+  deletedKeys.forEach(key => {
+    yMap.delete(key);
+  });
+
+  // Handle additions
+  addedKeys.forEach(key => {
+    yMap.set(key, jsonToYType(newValue![key]));
+  });
+
+  // Handle modifications
+  commonKeys.forEach(key => {
+    const oldValueValue = oldValue![key];
+    const newValueValue = newValue![key];
+    const yValue = yMap.get(key) as YMap<unknown> | YArray<unknown> | YText | undefined;
+
+    applyJsonDiffToYjs(oldValueValue, newValueValue, yValue, yMap, key);
   });
 }
 
-function handleArrayEvent(
-  event: Y.YArrayEvent<unknown>,
-  delta: Delta,
-  path: Path
-): void {
-  // const { target } = event;
-  const arrayDelta: Delta = { _t: 'a' };
-  const currentPath = [...path];
+function applyArrayDelta(oldValue: JSONArray, newValue: JSONArray, yArray: YArray<unknown>): void {
+  const { leftIndexes: oldIndexes, rightIndexes: newIndexes } = lcs(oldValue, newValue);
 
-  let index = 0;
-
-  event.changes.delta.forEach(change => {
-    if (change.insert !== undefined) {
-      // Handle insertions
-      (change.insert as unknown[]).forEach((value, i: number) => {
-        const idx = index + i;
-        const jsonValue = yjsValueToJSON(value);
-        arrayDelta[idx] = [jsonValue];
-      });
-      index += change.insert.length;
-    } else if (change.delete !== undefined) {
-      // Handle deletions
-      for (let i = 0; i < change.delete; i++) {
-        const idx = index;
-        arrayDelta[`_${idx}`] = [0, 0, 0];
-        index++;
-      }
-    } else if (change.retain !== undefined) {
-      // Retain indicates no change
-      index += change.retain;
-    } else {
-      console.warn('Unknown array change', change);
+  for (let newIdx = 0, oldIdx = 0, idxsIdx = 0; newIdx < newValue.length;) {
+    // Optimistically assume that the current elent changed
+    if (newIdx < newIndexes[idxsIdx] && oldIdx < oldIndexes[idxsIdx]) {
+      applyJsonDiffToYjs(oldValue[oldIdx], newValue[newIdx], yArray.get(newIdx) as YMap<unknown> | YArray<unknown> | YText, yArray, newIdx);
+      newIdx++;
+      oldIdx++;
     }
-  });
 
-  // Set the array delta in the overall delta object
-  setDeltaValue(delta, currentPath, arrayDelta);
-}
+    // Added
+    if (newIdx < newIndexes[idxsIdx]) {
+      yArray.insert(newIdx, [jsonToYType(newValue[newIdx])]);
+      newIdx++;
+      continue;
+    }
 
-function handleTextEvent(
-  event: Y.YTextEvent,
-  delta: Delta,
-  path: Path
-): void {
-  const { target } = event;
-  const currentPath = [...path];
-  // const oldValue = event._preSnapshot.getText(target).toString();
-  const oldValue = "";
-  const newValue = target.toString();
+    // Deleted
+    if (oldIdx < oldIndexes[idxsIdx]) {
+      yArray.delete(newIdx, 1);
+      oldIdx++;
+      continue;
+    }
 
-  setDeltaValue(delta, currentPath, [oldValue, newValue]);
-}
-
-function setDeltaValue(
-  delta: Delta,
-  path: Path,
-  value: Delta
-): void {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  let current: any = delta;
-  for (let i = 0; i < path.length - 1; i++) {
-    const key = path[i];
-    if (typeof key === 'number') {
-      if (!current['_t']) {
-        current['_t'] = 'a';
-      }
-      if (!current[key]) {
-        current[key] = {};
-      }
-      current = current[key];
-    } else {
-      if (!current[key]) {
-        current[key] = {};
-      }
-      current = current[key];
+    // Unchanged
+    if (newIndexes[idxsIdx] === newIdx) {
+      newIdx++;
+      oldIdx++;
+      idxsIdx++;
+      continue;
     }
   }
-  const lastKey = path[path.length - 1];
-  if (typeof lastKey === 'number') {
-    if (!current['_t']) {
-      current['_t'] = 'a';
-    }
-    current[lastKey] = value;
-  } else {
-    current[lastKey] = value;
-  }
+
+  yArray.delete(newValue.length, oldValue.length - newValue.length);
 }
 
-function yjsValueToJSON(value: unknown): JSONValue {
-  if (value instanceof Y.Text) {
-    return value.toString();
-  } else if (value instanceof Y.AbstractType) {
-    return value.toJSON() as JSONValue;
-  } else {
-    return value as JSONValue;
+export function applyTextDelta(oldValue: string, newValue: string, yText: YText): void {
+  const { leftIndexes: unchangedOldElementIdxs, rightIndexes: unchangedNewElementsIdxs } = lcs(oldValue, newValue);
+
+  for (let newIdx = 0, oldIdx = 0, idxsIdx = 0; newIdx < newValue.length;) {
+    // Added
+    if (newIdx < unchangedNewElementsIdxs[idxsIdx]) {
+      yText.insert(newIdx, newValue[newIdx]);
+      newIdx++;
+      continue;
+    }
+
+    // Deleted
+    if (oldIdx < unchangedOldElementIdxs[idxsIdx]) {
+      yText.delete(newIdx, 1);
+      oldIdx++;
+      continue;
+    }
+
+    // Unchanged
+    if (unchangedNewElementsIdxs[idxsIdx] === newIdx) {
+      newIdx++;
+      oldIdx++;
+      idxsIdx++;
+      continue;
+    }
   }
 }

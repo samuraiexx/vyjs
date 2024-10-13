@@ -1,29 +1,29 @@
 {
   "name": "vyjs",
-  "version": "1.1.0",
+  "version": "2.0.2",
   "description": "This project provides utilities for synchronizing Yjs documents with plain objects, applying diffs/deltas, and handling nested structures, arrays, and text types.",
-  "main": "./dist/cjs/main.js",
-  "module": "./dist/esm/main.mjs",
-  "types": "./dist/types/main.d.ts",
+  "main": "./dist/cjs/index.js",
+  "module": "./dist/esm/index.mjs",
+  "types": "./dist/types/index.d.ts",
   "scripts": {
     "build:cjs": "tsc -p tsconfig.cjs.json",
     "build:esm": "tsc -p tsconfig.esm.json && npm run rename:esm",
-    "rename:esm": "renamer --find .js --replace .mjs dist/esm/*",
+    "rename:esm": "ts2mjs dist/esm",
     "build": "npm run build:cjs && npm run build:esm",
     "prepack": "npm run clean && npm run build",
-    "publish": "npm run prepack && npm publish",
     "clean": "rimraf dist",
     "test": "jest"
   },
   "exports": {
+    "./package.json": "./package.json",
     ".": {
-      "require": "./dist/cjs/main.js",
-      "import": "./dist/esm/main.mjs"
+      "types": "./dist/types/index.d.ts",
+      "require": "./dist/cjs/index.js",
+      "import": "./dist/esm/index.mjs"
     }
   },
   "keywords": [
     "Yjs",
-    "jsondiffpatch",
     "synchronization",
     "collaboration",
     "real-time",
@@ -37,7 +37,6 @@
   "author": "SamuraiExx",
   "license": "MIT",
   "dependencies": {
-    "jsondiffpatch": "^0.6.0",
     "yjs": "^13.6.19"
   },
   "devDependencies": {
@@ -58,6 +57,7 @@
     "renamer": "^5.0.2",
     "rimraf": "^6.0.1",
     "ts-jest": "^29.2.5",
+    "ts2mjs": "^3.0.0",
     "typescript": "^5.6.2",
     "typescript-eslint": "^8.8.1"
   }

@@ -12,11 +12,12 @@ This project provides utilities for synchronizing Yjs documents with plain objec
 - [Usage](#usage)
   - [Synchronizing Yjs Documents with Plain Objects](#synchronizing-yjs-documents-with-plain-objects)
   - [Integrating with React](#integrating-with-react)
-  - [Applying Deltas to Yjs Documents](#applying-deltas-to-yjs-documents)
+  - [Applying Differences Between JSON Objects to Yjs Types](#applying-differences-between-json-objects-to-yjs-types)
 - [Running Tests](#running-tests)
 - [API Reference](#api-reference)
-  - [`getYjsEventsHandler(plainObject)`](#getyjseventshandlerplainobject)
-  - [`applyJsonDiffPatchDelta(yType, delta)`](#applyjsondiffpatchdeltaytype-delta)
+  - [`getYjsEventsHandler(currentValue, callback)`](#getyjseventshandlercurrentvalue-callback)
+  - [`applyJsonDiffToYjs(oldValue, newValue, yValue, yValueParent, yValueKey)`](#applyjsondifftoyjsoldvalue-newvalue-yvalue-yvalueparent-yvaluekey)
+  - [`jsonToYType(object)`](#jsontoytypeobject)
 - [Examples](#examples)
   - [Nested Structures Synchronization](#nested-structures-synchronization)
   - [Conflict Resolution with Concurrent Changes](#conflict-resolution-with-concurrent-changes)
@@ -32,7 +33,7 @@ This project provides utilities for synchronizing Yjs documents with plain objec
 - **Vanilla Integration**: Offers a straightforward way to use Yjs without additional abstractions.
 - **React Compatibility**: Simplifies the integration of Yjs with React applications.
 - **Synchronization**: Automatically synchronize Yjs documents with plain JavaScript objects.
-- **Delta Application**: Apply `jsondiffpatch` deltas to Yjs documents.
+- **Difference Application**: Apply the difference between two JSON objects to Yjs types.
 - **Nested Structures**: Support for nested maps, arrays, and text types within Yjs documents.
 - **Conflict Resolution**: Handle concurrent changes with Yjs's built-in conflict resolution mechanisms.
 - **Comprehensive Tests**: A suite of tests demonstrating various synchronization scenarios.
@@ -57,27 +58,23 @@ import { getYjsEventsHandler } from 'vyjs';
 
 const ydoc = new Y.Doc();
 const yMap = ydoc.getMap('rootMap');
-const plainObject = {};
+let currentValue = {};
 
-// Create a Yjs document, a root map, and a plain object. Then, set up the synchronization:
-const eventsHandler = getYjsEventsHandler(plainObject);
+const callback = (updatedValue) => {
+  currentValue = updatedValue;
+  console.log('Updated Value:', currentValue);
+};
+
+const eventsHandler = getYjsEventsHandler(currentValue, callback);
 yMap.observeDeep(eventsHandler);
 
-// Now, any changes made to yMap will be reflected in plainObject:
+// Now, any changes made to yMap will be reflected in currentValue via the callback:
 
 ydoc.transact(() => {
   yMap.set('number', 42);
   yMap.set('text', new Y.Text('Hello, Yjs!'));
 });
-
-console.log(plainObject);
-// Output:
-// {
-//   number: 42,
-//   text: 'Hello, Yjs!',
-// }
 ```
-
 
 ### Integrating with React
 
@@ -95,25 +92,21 @@ function App() {
   const [state, setState] = useState({});
 
   useEffect(() => {
-    const plainObject = {};
-    const eventsHandler = getYjsEventsHandler(plainObject);
+    let currentValue = {};
+
+    const callback = (updatedValue) => {
+      setState(updatedValue);
+    };
+
+    const eventsHandler = getYjsEventsHandler(currentValue, callback);
 
     yMap.observeDeep(eventsHandler);
 
-    // Update React state when plainObject changes
-    const updateState = () => {
-      setState({ ...plainObject });
-    };
-
-    // Observe changes in the Yjs document
-    ydoc.on('update', updateState);
-
     return () => {
-      ydoc.off('update', updateState);
+      yMap.unobserveDeep(eventsHandler);
     };
   }, []);
 
-  // Now, state will be in sync with the Yjs document
   return (
     <div>
       <h1>Yjs and React Integration</h1>
@@ -127,30 +120,35 @@ export default App;
 
 With this setup, any changes to the Yjs document will automatically update the React component's state, ensuring seamless synchronization between the collaborative data and your UI.
 
-### Applying Deltas to Yjs Documents
+### Applying Differences Between JSON Objects to Yjs Types
 
-Import the `applyJsonDiffPatchDelta` function:
+Import the `applyJsonDiffToYjs` function:
 
 ```javascript
-import { applyJsonDiffPatchDelta } from 'vyjs';
-import { Doc } from 'yjs'
+import { applyJsonDiffToYjs } from 'vyjs';
+import * as Y from 'yjs';
 
-const doc = new Doc();
-const yMap = doc.getMap('map');
+const ydoc = new Y.Doc();
+const yMap = ydoc.getMap('map');
 
-yMap.set('number', 42);
-yMap.set('text', 'Hello, Yjs!');
-yMap.delete('status');
-
-// Create a delta using jsondiffpatch format:
-const delta = {
-  number: [42, 100],          // Update 'number' from 42 to 100
-  status: [true],             // Add 'status' with value true
-  text: ['Hello, Yjs!', 'Hi'], // Update 'text' from 'Hello, Yjs!' to 'Hi'
+const oldValue = {
+  number: 42,
+  text: 'Hello, Yjs!',
 };
 
-// Apply the delta to the Yjs document:
-applyJsonDiffPatchDelta(yMap, delta);
+const newValue = {
+  number: 100,
+  text: 'Hi',
+  status: true,
+};
+
+// Initialize yMap with oldValue
+Object.keys(oldValue).forEach((key) => {
+  yMap.set(key, oldValue[key]);
+});
+
+// Apply the difference between oldValue and newValue to yMap
+applyJsonDiffToYjs(oldValue, newValue, yMap);
 
 console.log(yMap.get('number')); // Output: 100
 console.log(yMap.get('status')); // Output: true
@@ -158,39 +156,62 @@ console.log(yMap.get('text').toString()); // Output: 'Hi'
 ```
 
 ## Running Tests
+
 ```bash
 npm test
 ```
+
 ## API Reference
 
-### `getYjsEventsHandler(plainObject)`
+### `getYjsEventsHandler(currentValue, callback)`
 
 Returns an event handler function that synchronizes changes from a Yjs document to a plain JavaScript object.
 
 - **Parameters:**
-  - `plainObject` (_Object_): The plain JavaScript object to synchronize.
+  - `currentValue` (_Object_): The current value of the plain JavaScript object.
+  - `callback` (_Function_): The function to call with the updated value.
 - **Returns:**
   - _(Function)_: An event handler to be used with `yMap.observeDeep()`.
 
 **Usage:**
 
 ```javascript
-const eventsHandler = getYjsEventsHandler(plainObject);
+const eventsHandler = getYjsEventsHandler(currentValue, callback);
 yMap.observeDeep(eventsHandler);
 ```
 
-### `applyJsonDiffPatchDelta(yType, delta)`
-Applies a jsondiffpatch delta to a Yjs document.
+### `applyJsonDiffToYjs(oldValue, newValue, yValue, yValueParent, yValueKey)`
+
+Applies the difference between two JSON objects to a Yjs type.
 
 - **Parameters:**
-  - `yType` (Y.Map | Y.Array | Y.Text): The Yjs type to apply the delta to.
-  - `delta` (Delta): The delta object in jsondiffpatch format.
+  - `oldValue` (_any_): The original JSON value.
+  - `newValue` (_any_): The new JSON value.
+  - `yValue` (_Y.Map_ | _Y.Array_ | _Y.Text_): The Yjs type to apply the changes to.
+  - `yValueParent` (_Y.Map_ | _Y.Array_ | _undefined_): The parent of the Yjs type.
+  - `yValueKey` (_string_ | _number_ | _undefined_): The key or index in the parent where `yValue` is located.
 - **Returns:**
   - `void`
 
 **Usage:**
+
 ```javascript
-applyJsonDiffPatchDelta(yMap, delta);
+applyJsonDiffToYjs(oldValue, newValue, yValue, yValueParent, yValueKey);
+```
+
+### `jsonToYType(object)`
+
+Converts a JSON object to a Yjs type.
+
+- **Parameters:**
+  - `object` (_any_): The JSON object to convert.
+- **Returns:**
+  - _Y.Map_ | _Y.Array_ | _Y.Text_ | _primitive value_
+
+**Usage:**
+
+```javascript
+const yType = jsonToYType(jsonObject);
 ```
 
 ## Examples
@@ -206,7 +227,7 @@ ydoc.transact(() => {
   yMap.set('nested', nestedMap);
 });
 
-console.log(plainObject);
+console.log(currentValue);
 // Output:
 // {
 //   nested: {
@@ -220,7 +241,7 @@ ydoc.transact(() => {
   nestedMap.set('key2', 'value2');
 });
 
-console.log(plainObject);
+console.log(currentValue);
 // Output:
 // {
 //   nested: {
@@ -229,7 +250,6 @@ console.log(plainObject);
 //   },
 // }
 ```
-
 
 ### Conflict Resolution with Concurrent Changes
 
@@ -266,14 +286,15 @@ const update2 = Y.encodeStateAsUpdate(ydoc2);
 Y.applyUpdate(ydoc1, update2);
 Y.applyUpdate(ydoc2, update1);
 
-// Verify that the last change wins
+// Verify the merged result
 console.log(yMap1.get('sharedNumber')); // Output: 3
 console.log(yMap2.get('sharedNumber')); // Output: 3
 ```
 
 ## License
+
 This project is licensed under the MIT License. See the [LICENSE](LICENSE) file for details.
 
 ## Acknowledgments
+
 - **[Yjs](https://github.com/yjs/yjs)**: A powerful CRDT implementation for building collaborative applications.
-- **[jsondiffpatch](https://github.com/benjamine/jsondiffpatch)**: A library to diff and patch JavaScript objects.

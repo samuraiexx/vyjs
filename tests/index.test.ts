@@ -1,6 +1,5 @@
 import * as Y from 'yjs';
-import { getYjsEventsHandler, applyJsonDiffPatchDelta } from '../src/main';
-import { diff } from 'jsondiffpatch';
+import { getYjsEventsHandler, applyJsonDiffToYjs, lcs, applyTextDelta } from '../src/main';
 import { JSONObject } from '../src/types';
 
 describe('Yjs and jsondiffpatch integration tests', () => {
@@ -13,7 +12,7 @@ describe('Yjs and jsondiffpatch integration tests', () => {
     ydoc = new Y.Doc();
     yMap = ydoc.getMap<unknown>('rootMap');
     plainObject = {};
-    eventsHandler = getYjsEventsHandler(plainObject);
+    eventsHandler = getYjsEventsHandler(plainObject, (updatedObject) => { plainObject = updatedObject as JSONObject; });
     yMap.observeDeep(eventsHandler);
   });
 
@@ -22,26 +21,26 @@ describe('Yjs and jsondiffpatch integration tests', () => {
     ydoc.transact(() => {
       yMap.set('number', 42);
       yMap.set('boolean', true);
-      yMap.set('string', 'Hello');
+      yMap.set('string', new Y.Text('Hello '));
     });
 
     expect(plainObject).toEqual({
       number: 42,
       boolean: true,
-      string: 'Hello',
+      string: 'Hello ',
     });
 
     // Update primitive values
     ydoc.transact(() => {
       yMap.set('number', 100);
       yMap.set('boolean', false);
-      yMap.set('string', 'World');
+      (yMap.get('string') as Y.Text).insert(6, 'World');
     });
 
     expect(plainObject).toEqual({
       number: 100,
       boolean: false,
-      string: 'World',
+      string: 'Hello World',
     });
   });
 
@@ -221,10 +220,10 @@ describe('Yjs and jsondiffpatch integration tests', () => {
       message: 'Hello'
     };
 
-    const delta = diff(plainObject, newPlainObject);
-
     // Apply delta to Yjs document
-    applyJsonDiffPatchDelta(yMap, delta);
+    ydoc.transact(() => {
+      applyJsonDiffToYjs(plainObject, newPlainObject, yMap);
+    });
 
     // Verify Yjs document
     expect(yMap.get('count')).toBe(20);
@@ -237,6 +236,34 @@ describe('Yjs and jsondiffpatch integration tests', () => {
       status: false,
       message: 'Hello',
     });
+  });
+
+  test('Applying text deltas to Yjs documents', () => {
+    // Initialize data
+    ydoc.transact(() => {
+      yMap.set('text', new Y.Text('Hello, world!'));
+    });
+
+    expect(plainObject).toEqual({
+      text: 'Hello, world!',
+    });
+
+    const oldPlainObject = { ...plainObject };
+
+    const newPlainObject_1 = {
+      text: 'Hello, vyvs!'
+    };
+
+    const newPlainObject_2 = {
+      text: 'Hi, world!'
+    };
+
+    // Apply delta to Yjs document
+    applyJsonDiffToYjs(oldPlainObject, newPlainObject_1, yMap);
+    applyJsonDiffToYjs(oldPlainObject, newPlainObject_2, yMap);
+
+    // Verify Yjs document
+    expect((yMap.get('text') as Y.Text).toJSON()).toBe('Hi, vyvs!');
   });
 
   test('Conflict resolution with concurrent changes', () => {
@@ -283,4 +310,39 @@ describe('Yjs and jsondiffpatch integration tests', () => {
       sharedNumber: finalValue,
     });
   });
+
+  test('Test applyTextDelta', () => {
+    const oldValue = "Hello, amazing world!";
+    const newValue = "Hi, gello world!";
+
+    const doc = new Y.Doc();
+    const yText = doc.getText('text');
+    yText.insert(0, oldValue);
+
+    applyTextDelta(oldValue, newValue, yText);
+
+    expect(yText.toString()).toEqual(newValue);
+  });
+
+  test('Test LCS with String Input', () => {
+    const left = "Hello, amazing world!";
+    const right = "Hi, gello world!";
+
+    const { leftIndexes, rightIndexes } = lcs(left, right);
+
+    expect(leftIndexes).toEqual([0, 1, 2, 3, 4, 14, 15, 16, 17, 18, 19, 20]);
+    expect(rightIndexes).toEqual([0, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]);
+    expect(leftIndexes.map(i => left[i]).join('')).toEqual("Hello world!");
+  });
+
+  test('Test LCS with Object Array Input', () => {
+    const left = [{ id: 0 }, { id: 1 }, { id: 2 }, { id: 3 }, { id: 4 }, { id: 5 }, { id: 6 }];
+    const right = [{ id: -1 }, left[0], { id: 1 }, left[2], left[3], { id: 4 }, { id: 5 }, left[6], { id: 7 }];
+
+    const { leftIndexes, rightIndexes } = lcs(left, right);
+
+    expect(leftIndexes).toEqual([0, 2, 3, 6]);
+    expect(rightIndexes).toEqual([1, 3, 4, 7]);
+  });
+
 });
