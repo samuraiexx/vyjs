@@ -204,32 +204,34 @@ function applyMapDelta(oldValue: JSONObject, newValue: JSONObject, yMap: YMap<un
 }
 
 function applyArrayDelta(oldValue: JSONArray, newValue: JSONArray, yArray: YArray<unknown>): void {
-  const { leftIndexes: oldIndexes, rightIndexes: newIndexes } = lcs(oldValue, newValue);
+  const { leftIndexes: unchangedOldElementIdxs, rightIndexes: unchangedNewElementsIdxs } = lcs(oldValue, newValue);
+  unchangedNewElementsIdxs.push(newValue.length);
+  unchangedOldElementIdxs.push(oldValue.length);
 
-  for (let newIdx = 0, oldIdx = 0, idxsIdx = 0; newIdx < newValue.length;) {
+  for (let newIdx = 0, oldIdx = 0, idxsIdx = 0; newIdx < newValue.length || oldIdx < oldValue.length;) {
     // Optimistically assume that the current elent changed
-    if (newIdx < newIndexes[idxsIdx] && oldIdx < oldIndexes[idxsIdx]) {
+    if (newIdx < unchangedNewElementsIdxs[idxsIdx] && oldIdx < unchangedOldElementIdxs[idxsIdx]) {
       applyJsonDiffToYjs(oldValue[oldIdx], newValue[newIdx], yArray.get(newIdx) as YMap<unknown> | YArray<unknown> | YText, yArray, newIdx);
       newIdx++;
       oldIdx++;
     }
 
     // Added
-    if (newIdx < newIndexes[idxsIdx]) {
+    if (newIdx < unchangedNewElementsIdxs[idxsIdx]) {
       yArray.insert(newIdx, [jsonToYType(newValue[newIdx])]);
       newIdx++;
       continue;
     }
 
     // Deleted
-    if (oldIdx < oldIndexes[idxsIdx]) {
+    if (oldIdx < unchangedOldElementIdxs[idxsIdx]) {
       yArray.delete(newIdx, 1);
       oldIdx++;
       continue;
     }
 
     // Unchanged
-    if (newIndexes[idxsIdx] === newIdx) {
+    if (unchangedNewElementsIdxs[idxsIdx] === newIdx) {
       newIdx++;
       oldIdx++;
       idxsIdx++;
@@ -242,8 +244,10 @@ function applyArrayDelta(oldValue: JSONArray, newValue: JSONArray, yArray: YArra
 
 export function applyTextDelta(oldValue: string, newValue: string, yText: YText): void {
   const { leftIndexes: unchangedOldElementIdxs, rightIndexes: unchangedNewElementsIdxs } = lcs(oldValue, newValue);
+  unchangedNewElementsIdxs.push(newValue.length);
+  unchangedOldElementIdxs.push(oldValue.length);
 
-  for (let newIdx = 0, oldIdx = 0, idxsIdx = 0; newIdx < newValue.length;) {
+  for (let newIdx = 0, oldIdx = 0, idxsIdx = 0; newIdx < newValue.length || oldIdx < oldValue.length;) {
     // Added
     if (newIdx < unchangedNewElementsIdxs[idxsIdx]) {
       yText.insert(newIdx, newValue[newIdx]);

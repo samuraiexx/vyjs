@@ -238,7 +238,7 @@ describe('Yjs and jsondiffpatch integration tests', () => {
     });
   });
 
-  test('Applying text deltas to Yjs documents', () => {
+  test('Applying text deltas to Yjs documents - conflicting changes', () => {
     // Initialize data
     ydoc.transact(() => {
       yMap.set('text', new Y.Text('Hello, world!'));
@@ -264,6 +264,90 @@ describe('Yjs and jsondiffpatch integration tests', () => {
 
     // Verify Yjs document
     expect((yMap.get('text') as Y.Text).toJSON()).toBe('Hi, vyvs!');
+  });
+
+  test('Applying text deltas to Yjs documents - append text', () => {
+    // Initialize data
+    ydoc.transact(() => {
+      yMap.set('text', new Y.Text('Hello, world!'));
+    });
+
+    expect(plainObject).toEqual({
+      text: 'Hello, world!',
+    });
+
+    const newPlainObject = {
+      text: 'Hello, world! Hey, vyvs.'
+    };
+
+    // Apply delta to Yjs document
+    applyJsonDiffToYjs(plainObject, newPlainObject, yMap);
+
+    // Verify Yjs document
+    expect((yMap.get('text') as Y.Text).toJSON()).toBe('Hello, world! Hey, vyvs.');
+  });
+
+  test('Applying text deltas to Yjs documents - erase ending text', () => {
+    // Initialize data
+    ydoc.transact(() => {
+      yMap.set('text', new Y.Text('Hello, world!'));
+    });
+
+    expect(plainObject).toEqual({
+      text: 'Hello, world!',
+    });
+
+    const newPlainObject = {
+      text: 'Hello'
+    };
+
+    // Apply delta to Yjs document
+    applyJsonDiffToYjs(plainObject, newPlainObject, yMap);
+
+    // Verify Yjs document
+    expect((yMap.get('text') as Y.Text).toJSON()).toBe('Hello');
+  });
+
+  test('Applying text deltas to Yjs documents - erase starting text', () => {
+    // Initialize data
+    ydoc.transact(() => {
+      yMap.set('text', new Y.Text('Hello, world!'));
+    });
+
+    expect(plainObject).toEqual({
+      text: 'Hello, world!',
+    });
+
+    const newPlainObject = {
+      text: 'world!'
+    };
+
+    // Apply delta to Yjs document
+    applyJsonDiffToYjs(plainObject, newPlainObject, yMap);
+
+    // Verify Yjs document
+    expect((yMap.get('text') as Y.Text).toJSON()).toBe('world!');
+  });
+
+  test('Applying text deltas to Yjs documents - prepend text', () => {
+    // Initialize data
+    ydoc.transact(() => {
+      yMap.set('text', new Y.Text('Hello, world!'));
+    });
+
+    expect(plainObject).toEqual({
+      text: 'Hello, world!',
+    });
+
+    const newPlainObject = {
+      text: 'Hi, vyjs. Hello, world!'
+    };
+
+    // Apply delta to Yjs document
+    applyJsonDiffToYjs(plainObject, newPlainObject, yMap);
+
+    // Verify Yjs document
+    expect((yMap.get('text') as Y.Text).toJSON()).toBe('Hi, vyjs. Hello, world!');
   });
 
   test('Conflict resolution with concurrent changes', () => {
