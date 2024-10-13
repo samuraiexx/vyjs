@@ -20,7 +20,6 @@ This project provides utilities for synchronizing Yjs documents with plain objec
   - [`jsonToYType(object)`](#jsontoytypeobject)
 - [Examples](#examples)
   - [Nested Structures Synchronization](#nested-structures-synchronization)
-  - [Conflict Resolution with Concurrent Changes](#conflict-resolution-with-concurrent-changes)
 - [License](#license)
 - [Acknowledgments](#acknowledgments)
 
@@ -250,47 +249,6 @@ console.log(currentValue);
 //   },
 // }
 ```
-
-### Conflict Resolution with Concurrent Changes
-
-Simulate concurrent changes and observe conflict resolution.
-
-```javascript
-// Create two separate Yjs documents
-const ydoc1 = new Y.Doc();
-const ydoc2 = new Y.Doc();
-
-const yMap1 = ydoc1.getMap('rootMap');
-const yMap2 = ydoc2.getMap('rootMap');
-
-// Initialize both documents
-ydoc1.transact(() => {
-  yMap1.set('sharedNumber', 1);
-});
-ydoc2.transact(() => {
-  yMap2.set('sharedNumber', 1);
-});
-
-// Apply concurrent changes
-ydoc1.transact(() => {
-  yMap1.set('sharedNumber', 2);
-});
-ydoc2.transact(() => {
-  yMap2.set('sharedNumber', 3);
-});
-
-// Exchange updates
-const update1 = Y.encodeStateAsUpdate(ydoc1);
-const update2 = Y.encodeStateAsUpdate(ydoc2);
-
-Y.applyUpdate(ydoc1, update2);
-Y.applyUpdate(ydoc2, update1);
-
-// Verify the merged result
-console.log(yMap1.get('sharedNumber')); // Output: 3
-console.log(yMap2.get('sharedNumber')); // Output: 3
-```
-
 ## License
 
 This project is licensed under the MIT License. See the [LICENSE](LICENSE) file for details.
