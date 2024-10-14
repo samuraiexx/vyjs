@@ -17,6 +17,7 @@ jobs:
       - run: npm test
 
   publish-npm:
+    environment: production
     needs: build
     runs-on: ubuntu-latest
     steps:
@@ -26,7 +27,6 @@ jobs:
           node-version: 20
           registry-url: https://registry.npmjs.org/
       - name: Authenticate with npm
-        run: echo $'//registry.npmjs.org/:_authToken=${{ secrets.NPM_TOKEN }}\nregistry=https://registry.npmjs.org/' > ~/.npmrc
       - run: npm ci
       - run: npm publish --provenance --access public
         env:
