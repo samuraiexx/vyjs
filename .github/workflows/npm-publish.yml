@@ -26,7 +26,6 @@ jobs:
         with:
           node-version: 20
           registry-url: https://registry.npmjs.org/
-      - name: Authenticate with npm
       - run: npm ci
       - run: npm publish --provenance --access public
         env:
