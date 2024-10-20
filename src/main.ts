@@ -238,8 +238,6 @@ function applyArrayDelta(oldValue: JSONArray, newValue: JSONArray, yArray: YArra
       continue;
     }
   }
-
-  yArray.delete(newValue.length, oldValue.length - newValue.length);
 }
 
 export function applyTextDelta(oldValue: string, newValue: string, yText: YText): void {
