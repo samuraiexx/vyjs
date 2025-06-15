@@ -429,4 +429,27 @@ describe('Yjs and jsondiffpatch integration tests', () => {
     expect(rightIndexes).toEqual([1, 3, 4, 7]);
   });
 
+  test('Null value synchronization', () => {
+    ydoc.transact(() => {
+      yMap.set('maybe', null);
+    });
+
+    expect(plainObject).toEqual({
+      maybe: null,
+    });
+
+    const newPlainObject = {
+      maybe: 1,
+    };
+
+    ydoc.transact(() => {
+      applyJsonDiffToYjs(plainObject, newPlainObject, yMap);
+    });
+
+    expect(yMap.get('maybe')).toBe(1);
+    expect(plainObject).toEqual({
+      maybe: 1,
+    });
+  });
+
 });
