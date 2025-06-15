@@ -98,6 +98,8 @@ export function jsonToYType<T>(object: T): JsonToYType<T> {
     const yArray = new YArray();
     object.forEach((value) => yArray.push([jsonToYType(value)]));
     return yArray as JsonToYType<T>;
+  } else if (object === null) {
+    return null as unknown as JsonToYType<T>;
   } else if (typeof object === "object") {
     const map = new YMap();
     for (const key in object) {
